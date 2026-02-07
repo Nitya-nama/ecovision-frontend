@@ -1,6 +1,6 @@
 (() => {
 
-const API = "https://ecovision-api.onrender.com";
+const API = "https://ecovision-api-hfuu.onrender.com";
 
 /* ================= PARAMETERS ================= */
 
