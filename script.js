@@ -2,7 +2,7 @@
 
 const API = "https://ecovision-api-hfuu.onrender.com";
 
-/* ================= PARAMETERS ================= */
+/* ---------------- PARAMETERS ---------------- */
 
 const PARAMETERS = [
     "life_expectancy","hdi_index","co2_consump","gdp","services",
@@ -33,9 +33,22 @@ const ALGORITHMS = [
     { key:"random_forest", name:"Random Forest" }
 ];
 
-/* ================= STATE ================= */
+const VIZ_OPTIONS_MAP = {
+    decision_tree:["Line Chart","Bar Graph","Scatter Plot"],
+    random_forest:["Line Chart","Bar Graph","Scatter Plot"],
+    polynomial_reg:["Line Chart","Scatter Plot"],
+    svm:["Scatter Plot","Line Chart"]
+};
 
-const state = {
+const VIZ_JS_TYPE = {
+    "Line Chart":"line",
+    "Bar Graph":"bar",
+    "Scatter Plot":"scatter"
+};
+
+/* ---------------- STATE ---------------- */
+
+const state={
     country:null,
     selectedParams:[],
     selectedAlgo:null,
@@ -44,7 +57,7 @@ const state = {
     years:[]
 };
 
-/* ================= DOM ================= */
+/* ---------------- DOM ---------------- */
 
 const datalist=document.getElementById("country-list");
 const countryInput=document.getElementById("country-search");
@@ -55,7 +68,7 @@ const analyzeBtn=document.getElementById("analyze-btn");
 const resultCanvas=document.getElementById("result-chart");
 const metricsDisplay=document.getElementById("metrics-display");
 
-/* ================= API ================= */
+/* ---------------- FETCH COUNTRIES ---------------- */
 
 async function fetchCountries(){
     const res=await fetch(`${API}/countries`);
@@ -63,7 +76,7 @@ async function fetchCountries(){
     return data.countries||[];
 }
 
-/* ================= RENDER PARAMS ================= */
+/* ---------------- RENDER PARAMS ---------------- */
 
 function renderParams(){
     paramsContainer.innerHTML="";
@@ -76,8 +89,12 @@ function renderParams(){
         checkbox.value=param;
 
         checkbox.addEventListener("change",()=>{
-            if(checkbox.checked) state.selectedParams.push(param);
-            else state.selectedParams=state.selectedParams.filter(p=>p!==param);
+            if(checkbox.checked){
+                if(!state.selectedParams.includes(param))
+                    state.selectedParams.push(param);
+            }else{
+                state.selectedParams=state.selectedParams.filter(p=>p!==param);
+            }
         });
 
         const label=document.createElement("label");
@@ -89,7 +106,7 @@ function renderParams(){
     });
 }
 
-/* ================= RENDER ALGOS ================= */
+/* ---------------- RENDER ALGOS ---------------- */
 
 function renderAlgorithms(){
     algoContainer.innerHTML="";
@@ -102,39 +119,143 @@ function renderAlgorithms(){
             document.querySelectorAll(".algo-card").forEach(c=>c.classList.remove("selected"));
             card.classList.add("selected");
             state.selectedAlgo=algo.key;
+            renderVisualizationOptions();
         };
 
         algoContainer.appendChild(card);
     });
 }
 
-/* ================= METRICS ================= */
+/* ---------------- RENDER VISUALIZATION OPTIONS ---------------- */
+
+function renderVisualizationOptions(){
+
+    vizContainer.innerHTML="";
+    if(!state.selectedAlgo) return;
+
+    const options=VIZ_OPTIONS_MAP[state.selectedAlgo];
+
+    options.forEach(viz=>{
+        const div=document.createElement("div");
+        div.className="viz-option";
+        div.innerText=viz;
+
+        div.onclick=()=>{
+            document.querySelectorAll(".viz-option")
+                .forEach(v=>v.classList.remove("selected"));
+            div.classList.add("selected");
+            state.selectedViz=viz;
+        };
+
+        vizContainer.appendChild(div);
+    });
+
+    if(options.length){
+        vizContainer.children[0].click();
+    }
+}
+
+/* ---------------- METRICS ---------------- */
 
 function renderMetrics(metrics){
-    metricsDisplay.innerHTML="<h3>Model Performance</h3>";
+    metricsDisplay.innerHTML="<h3>Model Performance Metrics</h3>";
 
     for(const param in metrics){
         const m=metrics[param];
         const div=document.createElement("div");
-        div.innerHTML=`<b>${param}</b><br>
-        R²: ${m.r2.toFixed(3)} |
-        MAE: ${m.mae.toFixed(3)} |
-        RMSE: ${m.rmse.toFixed(3)}<br><br>`;
+        div.innerHTML=`<b>${PARAM_LABELS[param]}</b><br>
+        R²: ${m.r2.toFixed(4)} |
+        MAE: ${m.mae.toFixed(4)} |
+        RMSE: ${m.rmse.toFixed(4)}<br><br>`;
         metricsDisplay.appendChild(div);
     }
 }
 
-/* ================= ANALYSIS ================= */
+/* ---------------- GEMINI SUMMARY ---------------- */
+
+async function addSummary(country,parameters,years,predictions,chartType){
+
+    let summary=document.getElementById("chart-summary");
+    if(!summary){
+        summary=document.createElement("div");
+        summary.id="chart-summary";
+        document.getElementById("results-area").appendChild(summary);
+    }
+
+    summary.innerHTML="Generating AI insights...";
+
+    const preview=years.slice(0,6).join(", ");
+
+    const dataText=parameters.map(p=>{
+        const vals=predictions[p]||[];
+        return `${p}: ${vals.slice(0,6).map(v=>v.toFixed(2)).join(", ")}`;
+    }).join("\n");
+
+    const prompt=`
+Provide 3 short insights and 3 suggestions.
+Country: ${country}
+Chart: ${chartType}
+Years: ${preview}
+Data:
+${dataText}
+`;
+
+    try{
+        const res=await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=AIzaSyCxxWKjwoief0bjnr4FeI8qqB7J-FN4giU",{
+            method:"POST",
+            headers:{ "Content-Type":"application/json" },
+            body:JSON.stringify({
+                contents:[{role:"user",parts:[{text:prompt}]}]
+            })
+        });
+
+        const data=await res.json();
+        summary.innerHTML=data.candidates?.[0]?.content?.parts?.[0]?.text||"No summary generated";
+    }catch{
+        summary.innerHTML="AI summary unavailable";
+    }
+}
+
+/* ---------------- CHART ---------------- */
+
+function renderChart(years,predictions){
+
+    if(state.chart) state.chart.destroy();
+
+    const type=VIZ_JS_TYPE[state.selectedViz];
+
+    const datasets=Object.keys(predictions).map((param,i)=>({
+        label:PARAM_LABELS[param],
+        data:type==="scatter"
+            ? years.map((y,idx)=>({x:y,y:predictions[param][idx]}))
+            : predictions[param],
+        borderColor:`hsl(${i*60},70%,50%)`,
+        backgroundColor:`hsl(${i*60},70%,60%)`,
+        showLine:type!=="scatter"
+    }));
+
+    state.chart=new Chart(resultCanvas,{
+        type:type,
+        data:{
+            labels:type==="scatter"?undefined:years,
+            datasets
+        },
+        options:{responsive:true}
+    });
+}
+
+/* ---------------- ANALYSIS ---------------- */
 
 async function runAnalysis(){
 
-    if(!state.country||!state.selectedAlgo||!state.selectedParams.length){
-        alert("Select country, parameters and algorithm");
+    if(!state.country||!state.selectedAlgo||!state.selectedParams.length||!state.selectedViz){
+        alert("Please select country, parameters, algorithm and visualization");
         return;
     }
 
     analyzeBtn.innerText="Analyzing...";
     analyzeBtn.disabled=true;
+    metricsDisplay.innerHTML="";
 
     try{
 
@@ -149,53 +270,34 @@ async function runAnalysis(){
         });
 
         const data=await res.json();
-
         if(!res.ok) throw new Error(data.error);
 
         renderChart(data.years,data.predictions);
-
         if(data.metrics) renderMetrics(data.metrics);
 
+        addSummary(state.country,state.selectedParams,data.years,data.predictions,state.selectedViz);
+
     }catch(err){
-        alert("Error: "+err.message);
+        alert(err.message);
     }
 
     analyzeBtn.innerText="Analyze";
     analyzeBtn.disabled=false;
 }
 
-/* ================= CHART ================= */
-
-async function renderChart(years,predictions){
-
-    if(state.chart) state.chart.destroy();
-
-    const datasets=Object.keys(predictions).map((param,i)=>({
-        label:param,
-        data:predictions[param],
-        borderColor:`hsl(${i*60},70%,50%)`,
-        fill:false
-    }));
-
-    state.chart=new Chart(resultCanvas,{
-        type:"line",
-        data:{ labels:years, datasets }
-    });
-}
-
-/* ================= EXPORTS ================= */
+/* ---------------- EXPORT ---------------- */
 
 function exportCSV(){
-    const qs=state.selectedParams.map(p=>`parameters=${p}`).join("&");
-    window.open(`${API}/export/csv?country=${state.country}&${qs}`);
+    const qs=state.selectedParams.map(p=>`parameters=${encodeURIComponent(p)}`).join("&");
+    window.open(`${API}/export/csv?country=${encodeURIComponent(state.country)}&${qs}`);
 }
 
 function exportPDF(){
-    const qs=state.selectedParams.map(p=>`parameters=${p}`).join("&");
-    window.open(`${API}/export/pdf?country=${state.country}&${qs}`);
+    const qs=state.selectedParams.map(p=>`parameters=${encodeURIComponent(p)}`).join("&");
+    window.open(`${API}/export/pdf?country=${encodeURIComponent(state.country)}&${qs}`);
 }
 
-/* ================= INIT ================= */
+/* ---------------- INIT ---------------- */
 
 (async function init(){
 
@@ -210,7 +312,7 @@ function exportPDF(){
     renderAlgorithms();
 
     countryInput.addEventListener("change",()=>{
-        state.country=countryInput.value;
+        state.country=countryInput.value.trim();
     });
 
     analyzeBtn.addEventListener("click",runAnalysis);
@@ -218,4 +320,5 @@ function exportPDF(){
     document.getElementById("exportPDF").addEventListener("click",exportPDF);
 
 })();
+
 })();
