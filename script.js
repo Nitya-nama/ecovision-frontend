@@ -175,46 +175,21 @@ function renderMetrics(metrics){
 
 async function addSummary(country,parameters,years,predictions,chartType){
 
-    let summary=document.getElementById("chart-summary");
-    if(!summary){
-        summary=document.createElement("div");
-        summary.id="chart-summary";
-        document.getElementById("results-area").appendChild(summary);
-    }
+    const res = await fetch(`${API}/summary`,{
+    method:"POST",
+    headers:{ "Content-Type":"application/json" },
+    body:JSON.stringify({
+        country,
+        parameters,
+        years,
+        predictions,
+        chart:chartType
+    })
+});
 
-    summary.innerHTML="Generating AI insights...";
+const data = await res.json();
+summary.innerHTML=data.candidates?.[0]?.content?.parts?.[0]?.text||"No summary generated";
 
-    const preview=years.slice(0,6).join(", ");
-
-    const dataText=parameters.map(p=>{
-        const vals=predictions[p]||[];
-        return `${p}: ${vals.slice(0,6).map(v=>v.toFixed(2)).join(", ")}`;
-    }).join("\n");
-
-    const prompt=`
-Provide 3 short insights and 3 suggestions.
-Country: ${country}
-Chart: ${chartType}
-Years: ${preview}
-Data:
-${dataText}
-`;
-
-    try{
-        const res=await fetch("https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=AIzaSyCxxWKjwoief0bjnr4FeI8qqB7J-FN4giU",{
-            method:"POST",
-            headers:{ "Content-Type":"application/json" },
-            body:JSON.stringify({
-                contents:[{role:"user",parts:[{text:prompt}]}]
-            })
-        });
-
-        const data=await res.json();
-        summary.innerHTML=data.candidates?.[0]?.content?.parts?.[0]?.text||"No summary generated";
-    }catch{
-        summary.innerHTML="AI summary unavailable";
-    }
-}
 
 /* ---------------- CHART ---------------- */
 
