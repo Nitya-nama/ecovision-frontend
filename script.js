@@ -152,18 +152,16 @@ function renderVisualizationOptions(){
 /* ---------------- METRICS ---------------- */
 
 function renderMetrics(metrics){
-    metricsDisplay.innerHTML="<h3>Model Performance Metrics</h3>";
-
+    metricsDisplay.innerHTML = "<h3>Model Performance Metrics</h3>";
     for(const param in metrics){
-        const m=metrics[param];
-        const div=document.createElement("div");
-        div.className="metric-card";
-
-        div.innerHTML=`
-            <b>${PARAM_LABELS[param]}</b><br>
-            R² Score: ${m.r2.toFixed(4)}<br>
-            MAE: ${m.mae.toFixed(4)}<br>
-            RMSE: ${m.rmse.toFixed(4)}<br><br>
+        const m = metrics[param];
+        const div = document.createElement("div");
+        div.className = "metric-card";
+        div.innerHTML = `
+        <b>${PARAM_LABELS[param]}</b><br>
+        R² Score: ${m.r2.toFixed(4)}<br>
+        MAE: ${m.mae.toFixed(4)}<br>
+        RMSE: ${m.rmse.toFixed(4)}<br><br>
         `;
         metricsDisplay.appendChild(div);
     }
