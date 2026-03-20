@@ -221,38 +221,155 @@ options:{responsive:true}
 
 }
 
-/* ---------------- SUMMARY ---------------- */
+/* ---------------- CLAUDE API FALLBACK SUMMARY ---------------- */
 
-async function addSummary(country,parameters,years,predictions,chartType){
+async function generateClaudeSummary(country, parameters, years, predictions, chartType) {
+  const preview = years.slice(0, 6).join(", ");
+  const lines = parameters.map(p => {
+    const vals = (predictions[p] || []).slice(0, 6).map(v => Math.round(v * 100) / 100).join(", ");
+    return `${PARAM_LABELS[p] || p}: ${vals}`;
+  });
 
-let box=document.getElementById("chart-summary");
+  const prompt = `You are an economic data analyst. Based on the following ML-predicted data for ${country}, provide exactly 3 short insights and 3 actionable suggestions. Be concise and data-driven.
 
-if(!box){
-box=document.createElement("div");
-box.id="chart-summary";
-document.getElementById("results-area").appendChild(box);
+Country: ${country}
+Chart Type: ${chartType}
+Years (first 6): ${preview}
+Predicted Data:
+${lines.join("\n")}
+
+Format your response with clear sections:
+**Insights:**
+1. ...
+2. ...
+3. ...
+
+**Suggestions:**
+1. ...
+2. ...
+3. ...`;
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 1000,
+      messages: [
+        { role: "user", content: prompt }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Claude API error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const text = data.content?.find(b => b.type === "text")?.text;
+  if (!text) throw new Error("No text in Claude response");
+  return text;
 }
 
-box.innerHTML="Generating AI insights...";
+/* ---------------- SUMMARY (with Claude fallback) ---------------- */
 
-try{
+async function addSummary(country, parameters, years, predictions, chartType) {
 
-const res=await fetch(`${API}/summary`,{
-method:"POST",
-headers:{ "Content-Type":"application/json" },
-body:JSON.stringify({country,parameters,years,predictions,chart:chartType})
-});
+  let box = document.getElementById("chart-summary");
 
-const data=await res.json();
+  if (!box) {
+    box = document.createElement("div");
+    box.id = "chart-summary";
+    document.getElementById("results-area").appendChild(box);
+  }
 
-box.innerHTML=data.summary || data?.candidates?.[0]?.content?.parts?.[0]?.text || "AI summary unavailable";
+  box.innerHTML = "⏳ Generating AI insights...";
 
-}catch{
+  // 1. Try the backend (Gemini)
+  try {
+    const res = await fetch(`${API}/summary`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ country, parameters, years, predictions, chart: chartType })
+    });
 
-box.innerHTML="AI summary unavailable";
+    const data = await res.json();
+    const text = data.summary || data?.candidates?.[0]?.content?.parts?.[0]?.text;
 
+    if (text && text !== "AI summary unavailable") {
+      box.innerHTML = formatSummary(text);
+      return;
+    }
+    // If backend returned "AI summary unavailable", fall through to Claude
+    throw new Error("Backend summary unavailable");
+
+  } catch (backendErr) {
+    console.warn("Backend summary failed, trying Claude fallback:", backendErr.message);
+    box.innerHTML = "⏳ Switching to Claude for insights...";
+  }
+
+  // 2. Fallback: Claude API
+  try {
+    const text = await generateClaudeSummary(country, parameters, years, predictions, chartType);
+    box.innerHTML = formatSummary(text);
+  } catch (claudeErr) {
+    console.error("Claude fallback also failed:", claudeErr.message);
+    box.innerHTML = generateLocalSummary(country, parameters, years, predictions);
+  }
 }
 
+/* ---------------- FORMAT SUMMARY (markdown-lite) ---------------- */
+
+function formatSummary(text) {
+  return text
+    .replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\n/g, "<br>");
+}
+
+/* ---------------- LOCAL FALLBACK SUMMARY (no API) ---------------- */
+
+function generateLocalSummary(country, parameters, years, predictions) {
+  const firstYear = years[0];
+  const lastYear = years[years.length - 1];
+  const insights = [];
+  const suggestions = [];
+
+  parameters.forEach(param => {
+    const vals = predictions[param] || [];
+    if (vals.length < 2) return;
+    const first = vals[0];
+    const last = vals[vals.length - 1];
+    const changePct = (((last - first) / Math.abs(first)) * 100).toFixed(1);
+    const label = PARAM_LABELS[param] || param;
+    const trend = changePct > 0 ? "increased" : "decreased";
+    insights.push(`${label} <strong>${trend} by ${Math.abs(changePct)}%</strong> from ${firstYear} to ${lastYear}.`);
+  });
+
+  if (parameters.includes("gdp") || parameters.includes("gdp_per_capita")) {
+    suggestions.push("Consider diversifying economic sectors to sustain GDP growth.");
+  }
+  if (parameters.includes("co2_consump") || parameters.includes("co2_pcap_cons")) {
+    suggestions.push("Invest in renewable energy to reduce CO₂ emissions.");
+  }
+  if (parameters.includes("hdi_index") || parameters.includes("hdi_full")) {
+    suggestions.push("Strengthen education and healthcare to improve the Human Development Index.");
+  }
+  if (suggestions.length === 0) {
+    suggestions.push("Leverage data-driven policies to optimize the analyzed parameters.");
+    suggestions.push("Monitor year-over-year changes to respond to economic shifts proactively.");
+    suggestions.push("Engage international partnerships to benchmark against global standards.");
+  }
+
+  return `
+    <strong>📊 AI Insights for ${country}</strong><br><br>
+    <strong>Insights:</strong><br>
+    ${insights.slice(0, 3).map((i, n) => `${n + 1}. ${i}`).join("<br>")}<br><br>
+    <strong>Suggestions:</strong><br>
+    ${suggestions.slice(0, 3).map((s, n) => `${n + 1}. ${s}`).join("<br>")}
+    <br><br><small><em>⚠️ Generated locally — AI services were unavailable.</em></small>
+  `;
 }
 
 /* ---------------- EXPORT CSV ---------------- */
