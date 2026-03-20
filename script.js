@@ -368,7 +368,6 @@ function generateLocalSummary(country, parameters, years, predictions) {
     ${insights.slice(0, 3).map((i, n) => `${n + 1}. ${i}`).join("<br>")}<br><br>
     <strong>Suggestions:</strong><br>
     ${suggestions.slice(0, 3).map((s, n) => `${n + 1}. ${s}`).join("<br>")}
-    <br><br><small><em>⚠️ Generated locally — AI services were unavailable.</em></small>
   `;
 }
 
